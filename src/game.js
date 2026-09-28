@@ -5,9 +5,9 @@ export function createGame() {
   return { throws: [] };
 }
 
-export function addThrow(game, score, hit = `S${score}`) {
+export function addThrow(game, score, hit = `S${score}`, position = null) {
   if (game.throws.length >= ROUNDS * DARTS_PER_ROUND) return game;
-  return { ...game, throws: [...game.throws, { score, hit }] };
+  return { ...game, throws: [...game.throws, { score, hit, position }] };
 }
 
 export function undoThrow(game) {

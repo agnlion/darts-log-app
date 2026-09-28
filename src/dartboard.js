@@ -19,7 +19,7 @@ function sector(value, index, outerRadius, innerRadius, ring, color) {
   return `<path class="board-zone ${color}" data-board-score="${value}" data-board-ring="${ring}" d="${ringPath(middle - 9, middle + 9, outerRadius, innerRadius)}"/>`;
 }
 
-export function dartboardMarkup() {
+export function dartboardMarkup({ marks = [] } = {}) {
   const rings = SECTORS.map((value, index) => {
     const alternating = index % 2 ? 'dark' : 'light';
     const wire = index % 2 ? 'green' : 'red';
@@ -29,7 +29,8 @@ export function dartboardMarkup() {
     const [x, y] = point(index * 18, 153);
     return `<text x="${x}" y="${y}" class="board-number">${value}</text>`;
   }).join('');
-  return `<svg class="dartboard" viewBox="0 0 300 300" role="group" aria-label="ダーツボード。各エリアをタップして入力"><circle cx="150" cy="150" r="167" class="board-surround"/>${labels}<g>${rings}</g><circle class="board-zone green" data-board-score="25" data-board-ring="outer-bull" cx="150" cy="150" r="18"/><circle class="board-zone red" data-board-score="50" data-board-ring="bull" cx="150" cy="150" r="9"/><circle cx="150" cy="150" r="140" class="board-outline"/></svg>`;
+  const markers = marks.map((mark, index) => `<g class="throw-marker"><circle cx="${150 + mark.x}" cy="${150 + mark.y}" r="6.5"/><text x="${150 + mark.x}" y="${150 + mark.y}">${mark.label ?? index + 1}</text></g>`).join('');
+  return `<svg class="dartboard" viewBox="0 0 300 300" role="group" aria-label="ダーツボード。各エリアをタップして入力"><circle cx="150" cy="150" r="167" class="board-surround"/>${labels}<g>${rings}</g><circle class="board-zone green" data-board-score="25" data-board-ring="outer-bull" cx="150" cy="150" r="18"/><circle class="board-zone red" data-board-score="50" data-board-ring="bull" cx="150" cy="150" r="9"/><circle cx="150" cy="150" r="140" class="board-outline"/>${markers}</svg>`;
 }
 
 export function dartFromBoard(value, ring) {

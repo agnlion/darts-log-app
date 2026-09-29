@@ -11,7 +11,6 @@ let selectedRecordId = null;
 let didSaveCurrentGame = false;
 let savedCurrentGameId = null;
 const app = document.querySelector('#app');
-const LONG_PRESS_DELAY_MS = 350;
 const PRECISION_LOUPE_SCALE = 2.5;
 const PRECISION_LOUPE_SIZE_PX = 148;
 const BOARD_VIEWBOX_SIZE = 300;
@@ -37,7 +36,7 @@ function renderGame() {
   app.innerHTML = `<div class="shell"><header><div><p class="eyebrow">COUNT-UP / 8 ROUNDS</p><h1>DARTS LOG</h1></div><div class="header-actions"><button class="history-button" id="show-history">LOG</button><button class="new-game" id="new-game" aria-label="新しいゲームを開始">↻</button></div></header>
     <section class="scoreboard"><div class="total"><span>TOTAL</span><output>${view.total}</output></div><div class="progress"><span>ROUND ${String(view.currentRound).padStart(2, '0')} <i>/ ${view.isComplete ? 'FINISHED' : `${view.currentDart}TH DART`}</i></span><div class="dots">${Array.from({length: 24}, (_, i) => `<i class="${i < game.throws.length ? 'done' : ''}"></i>`).join('')}</div></div></section>
     <section class="current-round"><div><span>THIS ROUND</span><strong>${current.subtotal}</strong></div><div class="live-darts">${[0, 1, 2].map(i => `<span class="${current.throws[i] ? 'recorded' : ''}">${current.throws[i] ? current.throws[i].score : i + 1}</span>`).join('')}</div></section>
-    <section class="input-panel ${view.isComplete ? 'completed' : ''}"><div class="input-tabs"><button class="input-tab ${inputMode === 'keypad' ? 'selected' : ''}" data-input-mode="keypad">数字キー</button><button class="input-tab ${inputMode === 'board' ? 'selected' : ''}" data-input-mode="board">盤面タップ</button></div>${inputMode === 'keypad' ? `<div class="mode-row"><span>SELECT AREA</span><div class="multipliers">${[1,2,3].map(m => `<button class="multiplier ${selectedMultiplier === m ? 'selected' : ''}" data-multiplier="${m}">${multiplierLabel(m)}</button>`).join('')}</div></div><div class="keypad">${numberButtons}<button class="score-key special" data-score="BULL"><span>BULL</span><small>50</small></button><button class="score-key miss" data-score="MISS"><span>MISS</span><small>0</small></button></div>` : `<div class="board-guide"><span>狙ったエリアをタップ</span><small>外側=DOUBLE　中央の細い輪=TRIPLE</small></div><div class="board-wrap">${dartboardMarkup()}</div><button class="miss-board" data-score="MISS">MISS　0</button>`}<button class="undo" id="undo" ${game.throws.length ? '' : 'disabled'}>←　直前の1投を取り消す</button>${view.isComplete ? '<p class="complete-message">GAME SAVED — おつかれさまでした！</p>' : ''}</section>
+    <section class="input-panel ${view.isComplete ? 'completed' : ''}"><div class="input-tabs"><button class="input-tab ${inputMode === 'keypad' ? 'selected' : ''}" data-input-mode="keypad">数字キー</button><button class="input-tab ${inputMode === 'board' ? 'selected' : ''}" data-input-mode="board">盤面タップ</button></div>${inputMode === 'keypad' ? `<div class="mode-row"><span>SELECT AREA</span><div class="multipliers">${[1,2,3].map(m => `<button class="multiplier ${selectedMultiplier === m ? 'selected' : ''}" data-multiplier="${m}">${multiplierLabel(m)}</button>`).join('')}</div></div><div class="keypad">${numberButtons}<button class="score-key special" data-score="BULL"><span>BULL</span><small>50</small></button><button class="score-key miss" data-score="MISS"><span>MISS</span><small>0</small></button></div>` : `<div class="board-guide"><span>盤面に触れて、ルーペで狙いを合わせる</span><small>指を離すと着弾位置を記録</small></div><div class="board-wrap">${dartboardMarkup()}</div><button class="miss-board" data-score="MISS">MISS　0</button>`}<button class="undo" id="undo" ${game.throws.length ? '' : 'disabled'}>←　直前の1投を取り消す</button>${view.isComplete ? '<p class="complete-message">GAME SAVED — おつかれさまでした！</p>' : ''}</section>
     <section class="history"><div class="section-title"><span>ROUND LOG</span><span>1ST / 2ND / 3RD</span><span>SUBTOTAL</span></div>${renderRows(view)}</section></div>`;
   app.querySelectorAll('[data-score]').forEach(button => button.addEventListener('click', () => record(button.dataset.score)));
   const board = app.querySelector('.dartboard');
@@ -73,13 +72,10 @@ function recordBoardPosition(position) { const dart = dartAtBoardPosition(positi
 function vibrateOnConfirmedThrow() { navigator.vibrate?.(10); }
 
 function bindBoardInput(svg) {
-  let pressTimer = null;
   let activePointerId = null;
-  let precisionActive = false;
   let latestPosition = null;
   let loupe = null;
 
-  const clearPressTimer = () => { if (pressTimer) window.clearTimeout(pressTimer); pressTimer = null; };
   const removeLoupe = () => { loupe?.remove(); loupe = null; };
   const updateLoupe = (event) => {
     latestPosition = boardPosition(svg, event);
@@ -92,9 +88,7 @@ function bindBoardInput(svg) {
     loupe.style.left = `${left}px`;
     loupe.style.top = `${top}px`;
   };
-  const beginPrecision = (event) => {
-    if (activePointerId !== event.pointerId) return;
-    precisionActive = true;
+  const showLoupe = (event) => {
     loupe = document.createElement('div');
     loupe.className = 'precision-loupe';
     loupe.setAttribute('aria-hidden', 'true');
@@ -106,33 +100,26 @@ function bindBoardInput(svg) {
   svg.addEventListener('pointerdown', event => {
     if (event.pointerType === 'mouse' && event.button !== 0) return;
     activePointerId = event.pointerId;
-    precisionActive = false;
     latestPosition = boardPosition(svg, event);
     svg.setPointerCapture?.(event.pointerId);
-    pressTimer = window.setTimeout(() => beginPrecision(event), LONG_PRESS_DELAY_MS);
+    showLoupe(event);
   });
   svg.addEventListener('pointermove', event => {
     if (event.pointerId !== activePointerId) return;
     latestPosition = boardPosition(svg, event);
-    if (precisionActive) updateLoupe(event);
+    updateLoupe(event);
   });
   svg.addEventListener('pointerup', event => {
     if (event.pointerId !== activePointerId) return;
-    clearPressTimer();
     const position = boardPosition(svg, event);
-    const wasPrecision = precisionActive;
     activePointerId = null;
-    precisionActive = false;
     removeLoupe();
-    // A quick tap and a long-press release intentionally share this exact path.
     recordBoardPosition(position);
-    if (wasPrecision) event.preventDefault();
+    event.preventDefault();
   });
   svg.addEventListener('pointercancel', event => {
     if (event.pointerId !== activePointerId) return;
-    clearPressTimer();
     activePointerId = null;
-    precisionActive = false;
     removeLoupe();
   });
   svg.addEventListener('contextmenu', event => event.preventDefault());

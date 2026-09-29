@@ -1,5 +1,5 @@
 import { addThrow, createGame, gameView, undoThrow } from './game.js';
-import { dartFromBoard, dartboardMarkup } from './dartboard.js';
+import { dartAtBoardPosition, dartboardMarkup } from './dartboard.js';
 import { deleteGame, loadGames, saveGame } from './history-store.js';
 import './style.css';
 
@@ -11,6 +11,10 @@ let selectedRecordId = null;
 let didSaveCurrentGame = false;
 let savedCurrentGameId = null;
 const app = document.querySelector('#app');
+const LONG_PRESS_DELAY_MS = 350;
+const PRECISION_LOUPE_SCALE = 2.5;
+const PRECISION_LOUPE_SIZE_PX = 148;
+const BOARD_VIEWBOX_SIZE = 300;
 
 function multiplierLabel(multiplier) { return multiplier === 1 ? 'SINGLE' : multiplier === 2 ? 'DOUBLE' : 'TRIPLE'; }
 function scoreHit(value) {
@@ -36,7 +40,8 @@ function renderGame() {
     <section class="input-panel ${view.isComplete ? 'completed' : ''}"><div class="input-tabs"><button class="input-tab ${inputMode === 'keypad' ? 'selected' : ''}" data-input-mode="keypad">数字キー</button><button class="input-tab ${inputMode === 'board' ? 'selected' : ''}" data-input-mode="board">盤面タップ</button></div>${inputMode === 'keypad' ? `<div class="mode-row"><span>SELECT AREA</span><div class="multipliers">${[1,2,3].map(m => `<button class="multiplier ${selectedMultiplier === m ? 'selected' : ''}" data-multiplier="${m}">${multiplierLabel(m)}</button>`).join('')}</div></div><div class="keypad">${numberButtons}<button class="score-key special" data-score="BULL"><span>BULL</span><small>50</small></button><button class="score-key miss" data-score="MISS"><span>MISS</span><small>0</small></button></div>` : `<div class="board-guide"><span>狙ったエリアをタップ</span><small>外側=DOUBLE　中央の細い輪=TRIPLE</small></div><div class="board-wrap">${dartboardMarkup()}</div><button class="miss-board" data-score="MISS">MISS　0</button>`}<button class="undo" id="undo" ${game.throws.length ? '' : 'disabled'}>←　直前の1投を取り消す</button>${view.isComplete ? '<p class="complete-message">GAME SAVED — おつかれさまでした！</p>' : ''}</section>
     <section class="history"><div class="section-title"><span>ROUND LOG</span><span>1ST / 2ND / 3RD</span><span>SUBTOTAL</span></div>${renderRows(view)}</section></div>`;
   app.querySelectorAll('[data-score]').forEach(button => button.addEventListener('click', () => record(button.dataset.score)));
-  app.querySelectorAll('[data-board-score]').forEach(zone => zone.addEventListener('click', event => recordBoard(zone.dataset.boardScore, zone.dataset.boardRing, boardPosition(event))));
+  const board = app.querySelector('.dartboard');
+  if (board) bindBoardInput(board);
   app.querySelectorAll('[data-input-mode]').forEach(button => button.addEventListener('click', () => { inputMode = button.dataset.inputMode; render(); }));
   app.querySelectorAll('[data-multiplier]').forEach(button => button.addEventListener('click', () => { selectedMultiplier = Number(button.dataset.multiplier); render(); }));
   app.querySelector('#undo').addEventListener('click', () => { if (savedCurrentGameId) deleteGame(savedCurrentGameId); game = undoThrow(game); didSaveCurrentGame = false; savedCurrentGameId = null; selectedMultiplier = 1; render(); });
@@ -60,8 +65,77 @@ function renderDetail() {
   app.querySelector('#delete-record').addEventListener('click', () => { if (confirm('このゲームの記録を削除しますか？')) { deleteGame(record.id); screen = 'history'; render(); } });
 }
 function resetGame() { if (game.throws.length && !confirm('現在のゲームをリセットしますか？')) return; game = createGame(); didSaveCurrentGame = false; savedCurrentGameId = null; selectedMultiplier = 1; render(); }
-function record(value) { const dart = scoreHit(value); game = addThrow(game, dart.score, dart.hit); selectedMultiplier = 1; if (gameView(game).isComplete && !didSaveCurrentGame) { savedCurrentGameId = saveGame(game).id; didSaveCurrentGame = true; } render(); }
-function boardPosition(event) { const svg = event.currentTarget.ownerSVGElement; const box = svg.getBoundingClientRect(); return { x: Math.round((((event.clientX - box.left) / box.width) * 300 - 150) * 10) / 10, y: Math.round((((event.clientY - box.top) / box.height) * 300 - 150) * 10) / 10 }; }
-function recordBoard(value, ring, position) { const dart = dartFromBoard(value, ring); game = addThrow(game, dart.score, dart.hit, position); if (gameView(game).isComplete && !didSaveCurrentGame) { savedCurrentGameId = saveGame(game).id; didSaveCurrentGame = true; } render(); }
+function record(value) { const dart = scoreHit(value); if (commitThrow(dart)) selectedMultiplier = 1; }
+function finalizeThrow() { vibrateOnConfirmedThrow(); if (gameView(game).isComplete && !didSaveCurrentGame) { savedCurrentGameId = saveGame(game).id; didSaveCurrentGame = true; } render(); }
+function boardPosition(svg, event) { const box = svg.getBoundingClientRect(); return { x: Math.round((((event.clientX - box.left) / box.width) * BOARD_VIEWBOX_SIZE - 150) * 10) / 10, y: Math.round((((event.clientY - box.top) / box.height) * BOARD_VIEWBOX_SIZE - 150) * 10) / 10 }; }
+function commitThrow(dart, position = null) { const nextGame = addThrow(game, dart.score, dart.hit, position); if (nextGame === game) return false; game = nextGame; finalizeThrow(); return true; }
+function recordBoardPosition(position) { const dart = dartAtBoardPosition(position); return dart ? commitThrow(dart, position) : false; }
+function vibrateOnConfirmedThrow() { navigator.vibrate?.(10); }
+
+function bindBoardInput(svg) {
+  let pressTimer = null;
+  let activePointerId = null;
+  let precisionActive = false;
+  let latestPosition = null;
+  let loupe = null;
+
+  const clearPressTimer = () => { if (pressTimer) window.clearTimeout(pressTimer); pressTimer = null; };
+  const removeLoupe = () => { loupe?.remove(); loupe = null; };
+  const updateLoupe = (event) => {
+    latestPosition = boardPosition(svg, event);
+    if (!loupe) return;
+    const halfView = BOARD_VIEWBOX_SIZE / PRECISION_LOUPE_SCALE / 2;
+    const loupeSvg = loupe.querySelector('svg');
+    loupeSvg.setAttribute('viewBox', `${150 + latestPosition.x - halfView} ${150 + latestPosition.y - halfView} ${halfView * 2} ${halfView * 2}`);
+    const left = Math.max(8, Math.min(window.innerWidth - PRECISION_LOUPE_SIZE_PX - 8, event.clientX - PRECISION_LOUPE_SIZE_PX / 2));
+    const top = Math.max(8, event.clientY - PRECISION_LOUPE_SIZE_PX - 34);
+    loupe.style.left = `${left}px`;
+    loupe.style.top = `${top}px`;
+  };
+  const beginPrecision = (event) => {
+    if (activePointerId !== event.pointerId) return;
+    precisionActive = true;
+    loupe = document.createElement('div');
+    loupe.className = 'precision-loupe';
+    loupe.setAttribute('aria-hidden', 'true');
+    loupe.innerHTML = `${dartboardMarkup()}<span class="precision-crosshair"></span>`;
+    document.body.append(loupe);
+    updateLoupe(event);
+  };
+
+  svg.addEventListener('pointerdown', event => {
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    activePointerId = event.pointerId;
+    precisionActive = false;
+    latestPosition = boardPosition(svg, event);
+    svg.setPointerCapture?.(event.pointerId);
+    pressTimer = window.setTimeout(() => beginPrecision(event), LONG_PRESS_DELAY_MS);
+  });
+  svg.addEventListener('pointermove', event => {
+    if (event.pointerId !== activePointerId) return;
+    latestPosition = boardPosition(svg, event);
+    if (precisionActive) updateLoupe(event);
+  });
+  svg.addEventListener('pointerup', event => {
+    if (event.pointerId !== activePointerId) return;
+    clearPressTimer();
+    const position = boardPosition(svg, event);
+    const wasPrecision = precisionActive;
+    activePointerId = null;
+    precisionActive = false;
+    removeLoupe();
+    // A quick tap and a long-press release intentionally share this exact path.
+    recordBoardPosition(position);
+    if (wasPrecision) event.preventDefault();
+  });
+  svg.addEventListener('pointercancel', event => {
+    if (event.pointerId !== activePointerId) return;
+    clearPressTimer();
+    activePointerId = null;
+    precisionActive = false;
+    removeLoupe();
+  });
+  svg.addEventListener('contextmenu', event => event.preventDefault());
+}
 function render() { if (screen === 'history') renderHistory(); else if (screen === 'detail') renderDetail(); else renderGame(); }
 render();

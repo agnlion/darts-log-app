@@ -1,4 +1,5 @@
 const SECTORS = [20, 1, 18, 4, 13, 6, 10, 15, 2, 17, 3, 19, 7, 16, 8, 11, 14, 9, 12, 5];
+const RINGS = { bull: 9, outerBull: 18, innerSingle: 59, triple: 77, outerSingle: 121, double: 140 };
 
 function point(angle, radius) {
   const radians = (angle - 90) * Math.PI / 180;
@@ -40,4 +41,28 @@ export function dartFromBoard(value, ring) {
   const multiplier = ring === 'double' ? 2 : ring === 'triple' ? 3 : 1;
   const prefix = multiplier === 1 ? 'S' : multiplier === 2 ? 'D' : 'T';
   return { score: number * multiplier, hit: `${prefix}${number}` };
+}
+
+// Keeps coordinate input (including the precision loupe) on the same scoring
+// path as the SVG board zones. `position` is relative to the board centre.
+export function dartAtBoardPosition(position) {
+  const x = position.x;
+  const y = position.y;
+  const radius = Math.hypot(x, y);
+
+  if (radius > RINGS.double) return null;
+  if (radius <= RINGS.bull) return dartFromBoard(50, 'bull');
+  if (radius <= RINGS.outerBull) return dartFromBoard(25, 'outer-bull');
+
+  const angle = (Math.atan2(y, x) * 180 / Math.PI + 90 + 360) % 360;
+  const sector = Math.floor((angle + 9) / 18) % SECTORS.length;
+  const value = SECTORS[sector];
+  const ring = radius <= RINGS.innerSingle
+    ? 'single'
+    : radius <= RINGS.triple
+      ? 'triple'
+      : radius <= RINGS.outerSingle
+        ? 'single'
+        : 'double';
+  return dartFromBoard(value, ring);
 }

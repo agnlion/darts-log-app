@@ -99,6 +99,9 @@ function bindBoardInput(svg) {
 
   svg.addEventListener('pointerdown', event => {
     if (event.pointerType === 'mouse' && event.button !== 0) return;
+    // The board has its own press-and-drag interaction; do not let WebKit
+    // turn this press into native text selection or a long-press callout.
+    if (event.cancelable) event.preventDefault();
     activePointerId = event.pointerId;
     latestPosition = boardPosition(svg, event);
     svg.setPointerCapture?.(event.pointerId);
